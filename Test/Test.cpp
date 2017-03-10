@@ -1,8 +1,8 @@
 #include "stdafx.h"
 
-#define _ENABLE_ATOMIC_ALIGNMENT_FIX
-
 #include <windows.h>
+#undef min
+#undef max
 
 #include <iostream>
 #include <vector>
@@ -12,6 +12,9 @@
 #include <experimental/generator>
 #include <experimental/resumable>
 
+#include <ppltasks.h>
+#include <pplawait.h>
+
 #define BOOST_THREAD_PROVIDES_FUTURE
 #define BOOST_THREAD_PROVIDES_FUTURE_CONTINUATION
 #define BOOST_THREAD_PROVIDES_FUTURE_WHEN_ALL_WHEN_ANY
@@ -19,143 +22,9 @@
 #include <boost/thread.hpp>
 #include <boost/thread/executors/basic_thread_pool.hpp>
 #include <boost/thread/executors/executor.hpp>
-
 #include <boost/lockfree/queue.hpp>
 
-#include <ppltasks.h>
-#include <pplawait.h>
-
-/*
-namespace boost
-{
-  template <typename T>
-  bool await_ready(boost::future<T> const & t)
-  {
-    return t.is_ready();
-  }
-
-  template <typename T, typename Callback>
-  void await_suspend(boost::future<T> & t, Callback resume)
-  {
-    boost::thread th([&t, resume]
-    {
-      t.wait();
-      resume();
-    });
-    th.detach();
-    
-//     t.then([resume](boost::future<T> const &)
-//     {
-//       resume();
-//     });
-  }
-
-  template <typename T>
-  auto await_resume(boost::future<T> & t)
-  {
-    return t.get();
-  }
-}
-
-namespace std {
-  namespace experimental {
-
-    template <class T, class... Args>
-    struct coroutine_traits<boost::future<T>, Args...>
-    {
-      struct promise_type
-      {
-        boost::promise<T> promise;
-
-        boost::future<T> get_return_object()
-        {
-          return promise.get_future();
-        }
-
-        bool initial_suspend() { return false; }
-
-        bool final_suspend() { return false; }
-
-        void set_exception(std::exception_ptr e)
-        {
-          promise.set_exception(std::move(e));
-        }
-
-        void return_value(T & t)
-        {
-          promise.set_value(t);
-        }
-
-        void return_value(T && t)
-        {
-          promise.set_value(std::move(t));
-        }
-      };
-    };
-
-    template <class... Args>
-    struct coroutine_traits<boost::future<void>, Args...>
-    {
-      struct promise_type
-      {
-        boost::promise<void> promise;
-
-        boost::future<void> get_return_object()
-        {
-          return promise.get_future();
-        }
-
-        bool initial_suspend() { return false; }
-
-        bool final_suspend() { return false; }
-
-        void set_exception(std::exception_ptr e)
-        {
-          promise.set_exception(std::move(e));
-        }
-
-        void return_void()
-        {
-          promise.set_value();
-        }
-      };
-    };
-
-  }
-}
-
-std::future<size_t> calculate(size_t i)
-{
-  return std::async(std::launch::async, [i] { return i * i; });
-}
-
-std::future<std::string> convert(size_t i)
-{
-  return std::async(std::launch::async, [i] { return std::to_string(i); });
-}
-
-std::future<void> test(size_t i)
-{
-  std::string result = await convert(await calculate(i));
-  std::cout << result << " ";
-}
-
-boost::future<size_t> calculate(size_t i)
-{
-  return boost::async([=] { return i * i; });
-}
-
-boost::future<std::string> convert(size_t i)
-{
-  return boost::async([=] { return std::to_string(i); });
-}
-
-boost::future<void> test(size_t i)
-{
-  std::string result = await convert(await calculate(i));
-  std::cout << result << " ";
-}
-*/
+#include <range/v3/all.hpp>
 
 auto sleep_for(std::chrono::system_clock::duration duration)
 {
@@ -177,7 +46,7 @@ auto sleep_for(std::chrono::system_clock::duration duration)
     void await_suspend(std::experimental::coroutine_handle<> resume_cb)
     {
       int64_t relative_count = -duration.count();
-      timer = CreateThreadpoolTimer(TimerCallback, resume_cb.to_address(), nullptr);
+      timer = CreateThreadpoolTimer(TimerCallback, resume_cb.address(), nullptr);
       if (timer == 0) throw std::system_error(GetLastError(), std::system_category());
       SetThreadpoolTimer(timer, (PFILETIME)&relative_count, 0, 0);
     }
@@ -211,7 +80,6 @@ Concurrency::task<std::string> convert(size_t i)
 
 Concurrency::task<void> test(size_t x)
 {
-  await sleep_for(std::chrono::milliseconds(100 * x));
   size_t v = await calculate(x);
   std::string s = await convert(v);
 
@@ -224,29 +92,12 @@ std::experimental::generator<int> fib()
   int b = 1;
   while (true)
   {
-    yield a;
+    co_yield a;
     auto next = a + b;
     a = b;
     b = next;
   }
 }
-
-/*
-std::experimental::recursive_generator<int> range(int a, int b)
-{
-  auto n = b - a;
-  if (n <= 0)
-    return;
-  if (n == 1)
-  {
-    yield a;
-    return;
-  }
-  auto mid = a + n / 2;
-  yield range(a, mid);
-  yield range(mid, b);
-}
-*/
 
 class Point
 {
@@ -309,14 +160,14 @@ int _tmain(int argc, _TCHAR* argv[])
   v.reserve(6);
   
   auto indexes = { 0, 1, 2, 3, 4, 5 };
-  for (auto i : indexes)
+  for (auto && i : indexes)
   {
     v.push_back(std::to_string(i));
     std::cout << std::endl;
   }
 
   v.clear();
-  for (auto i : indexes)
+  for (auto && i : indexes)
   {
     v.emplace_back(std::to_string(i));
     std::cout << std::endl;
@@ -329,7 +180,7 @@ int _tmain(int argc, _TCHAR* argv[])
   sm.emplace(std::piecewise_construct, std::make_tuple("first"), std::make_tuple("test"));
 
   boost::lockfree::queue<Point> pq(10);
-  for (auto i : indexes)
+  for (auto && i : indexes)
   {
     pq.push(Point(1, 2, 3));
     Point p;
@@ -337,7 +188,7 @@ int _tmain(int argc, _TCHAR* argv[])
   }
 
   {
-    for (auto v : fib())
+    for (auto && v : fib())
     {
       if (v > 10)
       {
@@ -370,11 +221,10 @@ int _tmain(int argc, _TCHAR* argv[])
     {
       futures.emplace_back(boost::async(tp, [i]()
       {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100 * i));
-      }).then(tp, [i](auto f)
+      }).then(tp, [i](auto && f)
       {
         return i * i;
-      }).then(tp, [](auto f)
+      }).then(tp, [](auto && f)
       {
         std::string s = std::to_string(f.get());
         std::cout << s << " " << std::flush;
@@ -384,6 +234,17 @@ int _tmain(int argc, _TCHAR* argv[])
   }
 
   std::cout << std::flush << std::endl;
+
+	std::vector<int> vi{ 1,2,3,4,5,6,7,8,9,10 };
+	auto rng = vi | ranges::view::remove_if([](int i) {return i % 2 == 1; })
+		| ranges::view::transform([](int i) {return std::to_string(i); });
+
+	ranges::for_each(rng, [](std::string i)
+	{
+		std::cout << i << " " << std::flush;
+	});
+
+	std::cout << std::flush << std::endl;
 
   return 0;
 }
