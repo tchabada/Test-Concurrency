@@ -1,19 +1,12 @@
 #include "stdafx.h"
 
-#include <windows.h>
-#undef min
-#undef max
+#include "await.h"
 
 #include <iostream>
 #include <vector>
-#include <future>
 #include <unordered_map>
 
 #include <experimental/generator>
-#include <experimental/resumable>
-
-#include <ppltasks.h>
-#include <pplawait.h>
 
 #define BOOST_THREAD_PROVIDES_FUTURE
 #define BOOST_THREAD_PROVIDES_FUTURE_CONTINUATION
@@ -24,45 +17,33 @@
 #include <boost/thread/executors/executor.hpp>
 #include <boost/lockfree/queue.hpp>
 
+#include <ppltasks.h>
+#include <pplawait.h>
+
+#include <QtConcurrent/QtConcurrent>
+#include <QtCore/QFuture>
+
 #include <range/v3/all.hpp>
 
-auto sleep_for(std::chrono::system_clock::duration duration)
+boost::future<size_t> calculate_boost(size_t i)
 {
-  class awaiter
-  {
-    static void TimerCallback(PTP_CALLBACK_INSTANCE, void* Context, PTP_TIMER)
-    {
-      std::experimental::coroutine_handle<>::from_address(Context)();
-    }
-    
-    PTP_TIMER timer = nullptr;
-    std::chrono::system_clock::duration duration;
-  
-  public:
-    awaiter(std::chrono::system_clock::duration d) : duration(d) {}
-    
-    bool await_ready() const { return duration.count() <= 0; }
-    
-    void await_suspend(std::experimental::coroutine_handle<> resume_cb)
-    {
-      int64_t relative_count = -duration.count();
-      timer = CreateThreadpoolTimer(TimerCallback, resume_cb.address(), nullptr);
-      if (timer == 0) throw std::system_error(GetLastError(), std::system_category());
-      SetThreadpoolTimer(timer, (PFILETIME)&relative_count, 0, 0);
-    }
-    
-    void await_resume() {}
-    
-    ~awaiter()
-    {
-      if (timer) CloseThreadpoolTimer(timer);
-    }
-  };
-  
-  return awaiter{ duration };
+  return boost::async([=] { return i * i; });
 }
 
-Concurrency::task<size_t> calculate(size_t i)
+boost::future<std::string> convert_boost(size_t i)
+{
+  return boost::async([=] { return std::to_string(i); });
+}
+
+boost::future<void> test_boost(size_t i)
+{
+  size_t v = await calculate_boost(i);
+  std::string s = await convert_boost(v);
+
+  std::cout << s << " " << std::flush;
+}
+
+Concurrency::task<size_t> calculate_ppl(size_t i)
 {
   return Concurrency::create_task([i]
   {
@@ -70,7 +51,7 @@ Concurrency::task<size_t> calculate(size_t i)
   });
 }
 
-Concurrency::task<std::string> convert(size_t i)
+Concurrency::task<std::string> convert_ppl(size_t i)
 {
   return Concurrency::create_task([i]
   {
@@ -78,10 +59,10 @@ Concurrency::task<std::string> convert(size_t i)
   });
 }
 
-Concurrency::task<void> test(size_t x)
+Concurrency::task<void> test_ppl(size_t i)
 {
-  size_t v = await calculate(x);
-  std::string s = await convert(v);
+  size_t v = await calculate_ppl(i);
+  std::string s = await convert_ppl(v);
 
   std::cout << s << " " << std::flush;
 }
@@ -205,12 +186,26 @@ int _tmain(int argc, _TCHAR* argv[])
     std::vector<Concurrency::task<void>> futures;
     while (--i)
     {
-      futures.emplace_back(test(i));
+      futures.emplace_back(test_ppl(i));
     }
     Concurrency::when_all(futures.begin(), futures.end()).wait();
   }
 
   std::cout << std::flush << std::endl;
+
+/*
+  {
+    size_t i = 100;
+    std::vector<boost::future<void>> futures;
+    while (--i)
+    {
+      futures.emplace_back(test_boost(i));
+    }
+    boost::when_all(futures.begin(), futures.end()).wait();
+  }
+
+  std::cout << std::flush << std::endl;
+*/
 
   {
     boost::basic_thread_pool tp(4);
@@ -235,16 +230,31 @@ int _tmain(int argc, _TCHAR* argv[])
 
   std::cout << std::flush << std::endl;
 
-	std::vector<int> vi{ 1,2,3,4,5,6,7,8,9,10 };
-	auto rng = vi | ranges::view::remove_if([](int i) {return i % 2 == 1; })
-		| ranges::view::transform([](int i) {return std::to_string(i); });
+  {
+    QFutureSynchronizer<void> synchronizer;
 
-	ranges::for_each(rng, [](std::string i)
-	{
-		std::cout << i << " " << std::flush;
-	});
+    size_t i = 100;
+    while (--i)
+    {
+      synchronizer.addFuture(QtConcurrent::run([i]()
+      {
+        std::cout << i * i << " " << std::flush;
+      }));
+    }
+  }
 
-	std::cout << std::flush << std::endl;
+  std::cout << std::flush << std::endl;
+
+  std::vector<int> vi{ 1,2,3,4,5,6,7,8,9,10 };
+  auto rng = vi | ranges::view::remove_if([](int i) {return i % 2 == 1; })
+    | ranges::view::transform([](int i) {return std::to_string(i); });
+
+  ranges::for_each(rng, [](std::string i)
+  {
+    std::cout << i << " " << std::flush;
+  });
+
+  std::cout << std::flush << std::endl;
 
   return 0;
 }

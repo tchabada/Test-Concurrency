@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <tchar.h>
 
-
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 // TODO: reference additional headers your program requires here

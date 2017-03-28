@@ -1,32 +1,72 @@
 #pragma once
 
+#include <chrono>
+
+#include <experimental/resumable>
+
 #define BOOST_THREAD_PROVIDES_FUTURE
 #define BOOST_THREAD_PROVIDES_FUTURE_CONTINUATION
+#define BOOST_THREAD_PROVIDES_FUTURE_WHEN_ALL_WHEN_ANY
+#define BOOST_THREAD_PROVIDES_EXECUTORS
+#include <boost/thread.hpp>
 
-#include "boost/thread/future.hpp"
-#include <experimental/resumable>
+auto sleep_for(std::chrono::system_clock::duration duration)
+{
+  class awaiter
+  {
+    static void TimerCallback(PTP_CALLBACK_INSTANCE, void* Context, PTP_TIMER)
+    {
+      std::experimental::coroutine_handle<>::from_address(Context)();
+    }
+
+    PTP_TIMER timer = nullptr;
+    std::chrono::system_clock::duration duration;
+
+  public:
+    awaiter(std::chrono::system_clock::duration d) : duration(d) {}
+
+    bool await_ready() const { return duration.count() <= 0; }
+
+    void await_suspend(std::experimental::coroutine_handle<> resume_cb)
+    {
+      int64_t relative_count = -duration.count();
+      timer = CreateThreadpoolTimer(TimerCallback, resume_cb.address(), nullptr);
+      if (timer == 0) throw std::system_error(GetLastError(), std::system_category());
+      SetThreadpoolTimer(timer, (PFILETIME)&relative_count, 0, 0);
+    }
+
+    void await_resume() {}
+
+    ~awaiter()
+    {
+      if (timer) CloseThreadpoolTimer(timer);
+    }
+  };
+
+  return awaiter{ duration };
+}
 
 namespace boost {
 
   template <typename T>
-  bool await_ready(future<T> const & t)
+  bool await_ready(future<T> const & f)
   {
-    return t.is_ready();
+    return f.is_ready();
   }
 
-  template <typename T, typename Callback>
-  void await_suspend(future<T> & t, Callback resume)
+  template <typename T>
+  void await_suspend(future<T> & f, std::experimental::coroutine_handle<> resume)
   {
-    t.then([resume](future<T> const &)
+    f.then([resume](future<T> const &)
     {
       resume();
     });
   }
 
   template <typename T>
-  T await_resume(future<T> & t)
+  T await_resume(future<T> & f)
   {
-    return t.get();
+    return f.get();
   }
 
 } // namespace boost
@@ -49,18 +89,18 @@ namespace std {
           promise.set_exception(std::move(e));
         }
         /*
-        void set_result(T & t) {
-          promise.set_value(t);
+        void set_result(T & v) {
+          promise.set_value(v);
         }
-        void set_result(T && t) {
-          promise.set_value(std::move(t));
+        void set_result(T && v) {
+          promise.set_value(std::move(v));
         }
         */
-        void return_value(T & t) {
-          promise.set_value(t);
+        void return_value(T & v) {
+          promise.set_value(v);
         }
-        void return_value(T && t) {
-          promise.set_value(std::move(t));
+        void return_value(T && v) {
+          promise.set_value(std::move(v));
         }
       };
     };
