@@ -188,7 +188,6 @@ int _tmain(int argc, _TCHAR* argv[])
 
   std::cout << std::flush << std::endl;
 
-/*
   {
     size_t i = 100;
     std::vector<boost::future<void>> futures;
@@ -200,7 +199,6 @@ int _tmain(int argc, _TCHAR* argv[])
   }
 
   std::cout << std::flush << std::endl;
-*/
 
   {
     boost::basic_thread_pool tp(4);
