@@ -8,11 +8,6 @@
 
 #include <experimental/generator>
 
-#define BOOST_THREAD_PROVIDES_FUTURE
-#define BOOST_THREAD_PROVIDES_FUTURE_CONTINUATION
-#define BOOST_THREAD_PROVIDES_FUTURE_WHEN_ALL_WHEN_ANY
-#define BOOST_THREAD_PROVIDES_EXECUTORS
-#include <boost/thread.hpp>
 #include <boost/thread/executors/basic_thread_pool.hpp>
 #include <boost/thread/executors/executor.hpp>
 #include <boost/lockfree/queue.hpp>
@@ -37,8 +32,8 @@ boost::future<std::string> convert_boost(size_t i)
 
 boost::future<void> test_boost(size_t i)
 {
-  size_t v = await calculate_boost(i);
-  std::string s = await convert_boost(v);
+  size_t v = co_await calculate_boost(i);
+  std::string s = co_await convert_boost(v);
 
   std::cout << s << " " << std::flush;
 }
@@ -61,8 +56,8 @@ Concurrency::task<std::string> convert_ppl(size_t i)
 
 Concurrency::task<void> test_ppl(size_t i)
 {
-  size_t v = await calculate_ppl(i);
-  std::string s = await convert_ppl(v);
+  size_t v = co_await calculate_ppl(i);
+  std::string s = co_await convert_ppl(v);
 
   std::cout << s << " " << std::flush;
 }
@@ -101,7 +96,7 @@ public:
 
   String(const String& other) : s_(other.s_) { std::cout << "copy constructor\n"; }
 
-  String(String&& other) : s_(std::move(other.s_)) { std::cout << "move constructor\n"; }
+  String(String&& other) noexcept : s_(std::move(other.s_)) { std::cout << "move constructor\n"; }
 
   String& operator=(const String& other)
   {
@@ -241,6 +236,9 @@ int _tmain(int argc, _TCHAR* argv[])
         std::cout << i * i << " " << std::flush;
       }));
     }
+
+    synchronizer.waitForFinished();
+    QThreadPool::globalInstance()->waitForDone();
   }
 
   std::cout << std::flush << std::endl;
